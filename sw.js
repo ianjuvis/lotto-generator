@@ -2,9 +2,7 @@ const CACHE_NAME = 'lotto-generator-v1';
 const urlsToCache = [
     '/',
     '/index.html',
-    '/manifest.json',
-    '/icon-192x192.png',
-    '/icon-512x512.png'
+    '/manifest.json'
 ];
 
 self.addEventListener('install', event => {
