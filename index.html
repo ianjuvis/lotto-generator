@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#4CAF50">
     <link rel="manifest" href="manifest.json">
+    <script src='https://unpkg.com/tesseract.js@v2.1.1/dist/tesseract.min.js'></script>
     <style>
         .container {
             text-align: center;
@@ -56,6 +57,112 @@
                 max-width: 300px;
             }
         }
+        #camera-container {
+            margin: 20px 0;
+            display: none;
+            position: relative;
+        }
+        #video {
+            width: 100%;
+            max-width: 400px;
+            margin-bottom: 10px;
+            border-radius: 10px;
+        }
+        #canvas {
+            display: none;
+        }
+        .camera-guide {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 80%;
+            height: 60%;
+            border: 2px solid #4CAF50;
+            border-radius: 10px;
+            pointer-events: none;
+        }
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .loading-content {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+        }
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4CAF50;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .history-container {
+            margin: 20px 0;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+            display: none;
+        }
+        .history-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px;
+            border-bottom: 1px solid #ddd;
+        }
+        .history-item:last-child {
+            border-bottom: none;
+        }
+        .edit-numbers {
+            display: none;
+            margin: 10px 0;
+        }
+        .number-input {
+            padding: 5px;
+            margin: 0 5px;
+            width: 40px;
+            text-align: center;
+        }
+        .number-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+            margin: 10px 0;
+        }
+        .number-tag {
+            background: #4CAF50;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 15px;
+            display: inline-flex;
+            align-items: center;
+            margin: 2px;
+        }
+        .number-tag button {
+            background: none;
+            border: none;
+            color: white;
+            margin-left: 5px;
+            cursor: pointer;
+            padding: 0 5px;
+        }
     </style>
 </head>
 <body>
@@ -63,23 +170,176 @@
         <div class="input-container">
             <input type="text" id="excludeNumbers" placeholder="제외하고 싶은 번호를 입력하세요 (예: 1, 2, 3)">
         </div>
-        <button id="generateBtn" onclick="generateLottoNumbers()">번호 생성하기</button>
+        <div class="button-container">
+            <button class="button" onclick="startCamera()">카메라로 번호 인식</button>
+            <button class="button" onclick="generateLottoNumbers()">번호 생성하기</button>
+        </div>
+        <div id="camera-container">
+            <video id="video" autoplay playsinline></video>
+            <div class="camera-guide"></div>
+            <canvas id="canvas"></canvas>
+            <div class="button-container">
+                <button class="button" onclick="captureImage()">사진 촬영</button>
+                <button class="button" onclick="stopCamera()">취소</button>
+            </div>
+        </div>
+        <div id="ocr-result"></div>
+        <div class="edit-numbers" id="editNumbers">
+            <div class="number-list" id="numberList"></div>
+            <div class="button-container">
+                <button class="button" onclick="saveEditedNumbers()">저장</button>
+                <button class="button" onclick="cancelEdit()">취소</button>
+            </div>
+        </div>
+        <div class="history-container" id="historyContainer">
+            <h3>최근 인식한 번호</h3>
+            <div id="historyList"></div>
+        </div>
         <div id="result"></div>
     </div>
 
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <p>번호를 인식하는 중...</p>
+        </div>
+    </div>
+
     <script>
-        // 서비스 워커 등록
-        if ('serviceWorker' in navigator) {
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('/sw.js')
-                    .then(registration => {
-                        console.log('ServiceWorker registration successful');
-                    })
-                    .catch(err => {
-                        console.log('ServiceWorker registration failed: ', err);
-                    });
+        let stream = null;
+        let video = document.getElementById('video');
+        let canvas = document.getElementById('canvas');
+        let cameraContainer = document.getElementById('camera-container');
+        let ocrResult = document.getElementById('ocr-result');
+        let loadingOverlay = document.getElementById('loadingOverlay');
+        let editNumbers = document.getElementById('editNumbers');
+        let numberList = document.getElementById('numberList');
+        let historyContainer = document.getElementById('historyContainer');
+        let historyList = document.getElementById('historyList');
+        let currentNumbers = [];
+
+        // 히스토리 로드
+        function loadHistory() {
+            const history = JSON.parse(localStorage.getItem('lottoHistory') || '[]');
+            if (history.length > 0) {
+                historyContainer.style.display = 'block';
+                historyList.innerHTML = history.map((item, index) => `
+                    <div class="history-item">
+                        <span>${item.numbers.join(', ')}</span>
+                        <button class="button" onclick="useHistoryItem(${index})">사용</button>
+                    </div>
+                `).join('');
+            }
+        }
+
+        // 히스토리 저장
+        function saveHistory(numbers) {
+            const history = JSON.parse(localStorage.getItem('lottoHistory') || '[]');
+            history.unshift({ numbers, date: new Date().toISOString() });
+            if (history.length > 5) history.pop(); // 최근 5개만 유지
+            localStorage.setItem('lottoHistory', JSON.stringify(history));
+            loadHistory();
+        }
+
+        // 히스토리 아이템 사용
+        function useHistoryItem(index) {
+            const history = JSON.parse(localStorage.getItem('lottoHistory') || '[]');
+            const numbers = history[index].numbers;
+            document.getElementById('excludeNumbers').value = numbers.join(', ');
+            ocrResult.textContent = `선택된 번호: ${numbers.join(', ')}`;
+            ocrResult.style.display = 'block';
+        }
+
+        async function startCamera() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+                video.srcObject = stream;
+                cameraContainer.style.display = 'block';
+            } catch (err) {
+                console.error('카메라 접근 오류:', err);
+                alert('카메라에 접근할 수 없습니다.');
+            }
+        }
+
+        function stopCamera() {
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+                video.srcObject = null;
+                cameraContainer.style.display = 'none';
+                ocrResult.style.display = 'none';
+            }
+        }
+
+        function showLoading() {
+            loadingOverlay.style.display = 'flex';
+        }
+
+        function hideLoading() {
+            loadingOverlay.style.display = 'none';
+        }
+
+        function showNumberEditor(numbers) {
+            currentNumbers = [...numbers];
+            numberList.innerHTML = numbers.map(num => `
+                <div class="number-tag">
+                    ${num}
+                    <button onclick="removeNumber(${num})">×</button>
+                </div>
+            `).join('');
+            editNumbers.style.display = 'block';
+        }
+
+        function removeNumber(num) {
+            currentNumbers = currentNumbers.filter(n => n !== num);
+            showNumberEditor(currentNumbers);
+        }
+
+        function saveEditedNumbers() {
+            document.getElementById('excludeNumbers').value = currentNumbers.join(', ');
+            ocrResult.textContent = `수정된 번호: ${currentNumbers.join(', ')}`;
+            ocrResult.style.display = 'block';
+            editNumbers.style.display = 'none';
+            saveHistory(currentNumbers);
+        }
+
+        function cancelEdit() {
+            editNumbers.style.display = 'none';
+        }
+
+        function captureImage() {
+            const context = canvas.getContext('2d');
+            canvas.width = video.videoWidth;
+            canvas.height = video.videoHeight;
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            showLoading();
+            
+            // OCR 실행
+            Tesseract.recognize(
+                canvas.toDataURL('image/png'),
+                'kor+eng',
+                { logger: m => console.log(m) }
+            ).then(({ data: { text } }) => {
+                hideLoading();
+                // 숫자만 추출
+                const numbers = text.match(/\d+/g) || [];
+                const validNumbers = numbers
+                    .map(num => parseInt(num))
+                    .filter(num => !isNaN(num) && num >= 1 && num <= 45);
+                
+                if (validNumbers.length > 0) {
+                    showNumberEditor(validNumbers);
+                } else {
+                    alert('유효한 로또 번호를 인식하지 못했습니다.');
+                }
+                
+                stopCamera();
             });
         }
+
+        // 페이지 로드 시 히스토리 로드
+        window.addEventListener('load', loadHistory);
 
         function generateLottoNumbers() {
             // 입력받은 제외 번호 처리
