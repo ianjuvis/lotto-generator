@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>로또 번호 생성기</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#4CAF50">
+    <link rel="manifest" href="manifest.json">
+    <style>
+        .container {
+            text-align: center;
+            margin-top: 50px;
+        }
+        #generateBtn {
+            padding: 15px 30px;
+            font-size: 18px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        #generateBtn:hover {
+            background-color: #45a049;
+        }
+        #result {
+            margin-top: 30px;
+            font-size: 24px;
+        }
+        .input-container {
+            margin: 20px 0;
+        }
+        #excludeNumbers {
+            padding: 10px;
+            font-size: 16px;
+            width: 300px;
+            margin-bottom: 10px;
+        }
+        .combination {
+            margin: 10px 0;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        @media (max-width: 600px) {
+            .container {
+                margin-top: 20px;
+                padding: 0 15px;
+            }
+            #excludeNumbers {
+                width: 100%;
+                max-width: 300px;
+            }
+            #generateBtn {
+                width: 100%;
+                max-width: 300px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="input-container">
+            <input type="text" id="excludeNumbers" placeholder="제외하고 싶은 번호를 입력하세요 (예: 1, 2, 3)">
+        </div>
+        <button id="generateBtn" onclick="generateLottoNumbers()">번호 생성하기</button>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        // 서비스 워커 등록
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registration successful');
+                    })
+                    .catch(err => {
+                        console.log('ServiceWorker registration failed: ', err);
+                    });
+            });
+        }
+
+        function generateLottoNumbers() {
+            // 입력받은 제외 번호 처리
+            const excludeInput = document.getElementById('excludeNumbers').value;
+            const excludeNumbers = excludeInput.split(',')
+                .map(num => parseInt(num.trim()))
+                .filter(num => !isNaN(num) && num >= 1 && num <= 45);
+
+            let resultHTML = '';
+            
+            // 5개의 조합 생성
+            for (let combination = 0; combination < 5; combination++) {
+                let numbers = [];
+                let availableNumbers = Array.from({length: 45}, (_, i) => i + 1)
+                    .filter(num => !excludeNumbers.includes(num));
+                
+                // 6개의 숫자를 무작위로 선택
+                for (let i = 0; i < 6; i++) {
+                    let randomIndex = Math.floor(Math.random() * availableNumbers.length);
+                    numbers.push(availableNumbers[randomIndex]);
+                    availableNumbers.splice(randomIndex, 1);
+                }
+                
+                // 오름차순 정렬
+                numbers.sort((a, b) => a - b);
+                
+                // 결과 HTML에 추가
+                resultHTML += `<div class="combination">${combination + 1}번째 조합: ${numbers.join(', ')}</div>`;
+            }
+            
+            // 결과 표시
+            document.getElementById('result').innerHTML = resultHTML;
+        }
+    </script>
+</body>
+</html>
